@@ -1,10 +1,11 @@
 import cors from 'cors';
 import express from 'express';
 import mongoose from 'mongoose';
+import { connectDatabase, mongoUri } from './config/database.js';
+import { Activity, LeaderboardEntry, Team, User, Workout } from './models/index.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 8000);
-const mongoUri = process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/octofit_db';
 
 function getApiBaseUrl() {
   const codespaceName = process.env.CODESPACE_NAME;
@@ -13,31 +14,19 @@ function getApiBaseUrl() {
     : `http://localhost:${port}`;
 }
 
-const resources = {
-  users: [
-    { id: 'u1', name: 'Mona Octocat', email: 'mona@example.com', team: 'OctoFit Core' },
-    { id: 'u2', name: 'Hubber Sprint', email: 'hubber@example.com', team: 'Branch Burners' },
-  ],
-  teams: [
-    { id: 't1', name: 'OctoFit Core', members: 8 },
-    { id: 't2', name: 'Branch Burners', members: 6 },
-  ],
-  activities: [
-    { id: 'a1', userId: 'u1', type: 'run', durationMinutes: 32, calories: 310 },
-    { id: 'a2', userId: 'u2', type: 'strength', durationMinutes: 45, calories: 420 },
-  ],
-  leaderboard: [
-    { rank: 1, team: 'OctoFit Core', points: 2450 },
-    { rank: 2, team: 'Branch Burners', points: 2310 },
-  ],
-  workouts: [
-    { id: 'w1', title: 'Morning Mobility', difficulty: 'beginner', durationMinutes: 20 },
-    { id: 'w2', title: 'Full Stack Strength', difficulty: 'intermediate', durationMinutes: 40 },
-  ],
-};
-
 app.use(cors());
 app.use(express.json());
+
+function isDatabaseConnected() {
+  return mongoose.connection.readyState === 1;
+}
+
+function sendDatabaseUnavailable(response: express.Response) {
+  response.status(503).json({
+    baseUrl: getApiBaseUrl(),
+    error: 'MongoDB is not connected. Start MongoDB on port 27017 and seed octofit_db.',
+  });
+}
 
 app.get('/api/health', (_request, response) => {
   response.json({
@@ -50,32 +39,83 @@ app.get('/api/health', (_request, response) => {
   });
 });
 
-app.get('/api/users/', (_request, response) => {
-  response.json({ baseUrl: getApiBaseUrl(), data: resources.users });
+app.get('/api/users/', async (_request, response, next) => {
+  if (!isDatabaseConnected()) {
+    sendDatabaseUnavailable(response);
+    return;
+  }
+
+  try {
+    const users = await User.find().sort({ name: 1 }).lean();
+    response.json({ baseUrl: getApiBaseUrl(), data: users });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/teams/', (_request, response) => {
-  response.json({ baseUrl: getApiBaseUrl(), data: resources.teams });
+app.get('/api/teams/', async (_request, response, next) => {
+  if (!isDatabaseConnected()) {
+    sendDatabaseUnavailable(response);
+    return;
+  }
+
+  try {
+    const teams = await Team.find().sort({ name: 1 }).lean();
+    response.json({ baseUrl: getApiBaseUrl(), data: teams });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/activities/', (_request, response) => {
-  response.json({ baseUrl: getApiBaseUrl(), data: resources.activities });
+app.get('/api/activities/', async (_request, response, next) => {
+  if (!isDatabaseConnected()) {
+    sendDatabaseUnavailable(response);
+    return;
+  }
+
+  try {
+    const activities = await Activity.find().sort({ completedAt: -1 }).lean();
+    response.json({ baseUrl: getApiBaseUrl(), data: activities });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/leaderboard/', (_request, response) => {
-  response.json({ baseUrl: getApiBaseUrl(), data: resources.leaderboard });
+app.get('/api/leaderboard/', async (_request, response, next) => {
+  if (!isDatabaseConnected()) {
+    sendDatabaseUnavailable(response);
+    return;
+  }
+
+  try {
+    const leaderboard = await LeaderboardEntry.find().sort({ rank: 1 }).lean();
+    response.json({ baseUrl: getApiBaseUrl(), data: leaderboard });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/workouts/', (_request, response) => {
-  response.json({ baseUrl: getApiBaseUrl(), data: resources.workouts });
+app.get('/api/workouts/', async (_request, response, next) => {
+  if (!isDatabaseConnected()) {
+    sendDatabaseUnavailable(response);
+    return;
+  }
+
+  try {
+    const workouts = await Workout.find().sort({ difficulty: 1, title: 1 }).lean();
+    response.json({ baseUrl: getApiBaseUrl(), data: workouts });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use((error: Error, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+  response.status(500).json({ error: error.message });
 });
 
 async function startServer() {
   try {
-    await mongoose.connect(mongoUri, {
-      dbName: 'octofit_db',
-      serverSelectionTimeoutMS: 3000,
-    });
+    await connectDatabase();
     console.log(`Connected to MongoDB at ${mongoUri}`);
   } catch (error) {
     console.error('MongoDB connection failed:', error);
