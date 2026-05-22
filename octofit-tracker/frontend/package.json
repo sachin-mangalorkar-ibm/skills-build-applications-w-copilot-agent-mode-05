@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "description": "OctoFit Tracker frontend app",
+  "description": "OctoFit Tracker frontend app v2",
   "private": true,
   "version": "0.0.0",
   "type": "module",
